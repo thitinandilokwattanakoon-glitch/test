@@ -38,11 +38,6 @@
           </div>
 
           <div class="field">
-            <label>เบอร์โทร</label>
-            <input type="tel" v-model="phone" placeholder="08x-xxx-xxxx" />
-          </div>
-
-          <div class="field">
             <label>รหัสผ่าน</label>
             <div class="password-row">
               <input :type="showPw ? 'text' : 'password'" v-model="password" placeholder="อย่างน้อย 8 ตัวอักษร" required />
@@ -90,7 +85,7 @@
         </form>
 
         <Transition name="fade">
-          <div class="toast" v-if="toast">{{ toast }}</div>
+          <div class="toast" :class="{ 'toast-error': toastIsError }" v-if="toast">{{ toast }}</div>
         </Transition>
       </div>
       </div>
@@ -130,13 +125,14 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { registerUser } from '../lib/api.js'
+import { getDeviceId } from '../lib/device.js'
 
 const router = useRouter()
 
 const firstName = ref('')
 const lastName = ref('')
 const email = ref('')
-const phone = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const showPw = ref(false)
@@ -144,6 +140,7 @@ const showPw2 = ref(false)
 const agree = ref(false)
 const loading = ref(false)
 const toast = ref('')
+const toastIsError = ref(false)
 
 const strength = computed(() => {
   const v = password.value
@@ -165,14 +162,29 @@ const canSubmit = computed(
   () => agree.value && password.value.length >= 8 && password.value === confirmPassword.value
 )
 
-function handleRegister() {
+async function handleRegister() {
   if (!canSubmit.value) return
   loading.value = true
-  setTimeout(() => {
+  toast.value = ''
+  toastIsError.value = false
+
+  try {
+    // ส่ง device_id เดิม (ถ้ามีประวัติสแกนแบบไม่ login มาก่อน) ไปด้วย
+    // เพื่อให้ backend ผูกประวัติเก่าเข้ากับบัญชีใหม่แทนที่จะทิ้งไป
+    await registerUser({
+      email: email.value,
+      password: password.value,
+      displayName: `${firstName.value} ${lastName.value}`.trim(),
+      deviceId: getDeviceId(),
+    })
+    toast.value = 'สมัครสมาชิกสำเร็จ'
+    setTimeout(() => router.push('/'), 600)
+  } catch (err) {
+    toastIsError.value = true
+    toast.value = err.message || 'สมัครสมาชิกไม่สำเร็จ ลองใหม่อีกครั้ง'
+  } finally {
     loading.value = false
-    toast.value = 'สมัครสมาชิกสำเร็จ (เดโม)'
-    setTimeout(() => router.push('/'), 700)
-  }, 900)
+  }
 }
 </script>
 
@@ -260,6 +272,7 @@ form { display: flex; flex-direction: column; gap: 15px; }
   background: var(--dark); color: #fff; font-size: 13px; font-weight: 600;
   padding: 10px 20px; border-radius: 999px; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25); z-index: 40;
 }
+.toast.toast-error { background: var(--red); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 

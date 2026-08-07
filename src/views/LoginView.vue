@@ -77,21 +77,8 @@
           </button>
         </form>
 
-        <div class="divider"><span>หรือ</span></div>
-
-        <div class="social-row">
-          <button class="social-btn">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.3-1.7 3.8-5.5 3.8-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.1.8 3.9 1.5l2.6-2.5C16.9 3.2 14.7 2.2 12 2.2 6.9 2.2 2.7 6.4 2.7 11.7S6.9 21.2 12 21.2c6.9 0 9.2-4.8 9.2-7.3 0-.5-.05-.9-.1-1.3H12z" /></svg>
-            Google
-          </button>
-          <button class="social-btn">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#1877F2" d="M22 12a10 10 0 1 0-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.5h-1.3c-1.2 0-1.6.8-1.6 1.6V12h2.8l-.4 2.9h-2.4v7A10 10 0 0 0 22 12z" /></svg>
-            Facebook
-          </button>
-        </div>
-
         <Transition name="fade">
-          <div class="toast" v-if="toast">{{ toast }}</div>
+          <div class="toast" :class="{ 'toast-error': toastIsError }" v-if="toast">{{ toast }}</div>
         </Transition>
       </div>
       </div>
@@ -102,6 +89,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { loginUser } from '../lib/api.js'
 
 const router = useRouter()
 
@@ -111,14 +99,23 @@ const showPw = ref(false)
 const remember = ref(true)
 const loading = ref(false)
 const toast = ref('')
+const toastIsError = ref(false)
 
-function handleLogin() {
+async function handleLogin() {
   loading.value = true
-  setTimeout(() => {
+  toast.value = ''
+  toastIsError.value = false
+
+  try {
+    await loginUser({ email: email.value, password: password.value })
+    toast.value = 'เข้าสู่ระบบสำเร็จ'
+    setTimeout(() => router.push('/'), 600)
+  } catch (err) {
+    toastIsError.value = true
+    toast.value = err.message || 'เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง'
+  } finally {
     loading.value = false
-    toast.value = 'เข้าสู่ระบบสำเร็จ (เดโม)'
-    setTimeout(() => router.push('/'), 700)
-  }, 900)
+  }
 }
 </script>
 
@@ -253,22 +250,12 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .loading-dots i:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink-dot { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
 
-.divider { display: flex; align-items: center; gap: 12px; margin: 24px 0 18px; color: var(--muted); font-size: 12px; }
-.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-
-.social-row { display: flex; gap: 10px; }
-.social-btn {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper);
-  font-size: 13.5px; font-weight: 600; color: var(--ink); cursor: pointer; transition: 0.15s;
-}
-.social-btn:hover { border-color: var(--green); background: rgba(79, 146, 113, 0.05); }
-
 .toast {
   position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
   background: var(--dark); color: #fff; font-size: 13px; font-weight: 600;
   padding: 10px 20px; border-radius: 999px; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25); z-index: 40;
 }
+.toast.toast-error { background: var(--red); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
