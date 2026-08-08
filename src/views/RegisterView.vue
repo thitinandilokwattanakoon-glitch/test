@@ -125,8 +125,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { registerUser } from '../lib/api.js'
-import { getDeviceId } from '../lib/device.js'
+import { registerUser, getDeviceId } from '../lib/api.js'
 
 const router = useRouter()
 

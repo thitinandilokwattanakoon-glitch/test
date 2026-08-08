@@ -20,3 +20,14 @@ export const verdictMap = {
     desc: 'พบส่วนประกอบที่มีความเสี่ยงสูงตามโปรไฟล์ของคุณ',
   },
 }
+
+// backend ส่ง status เป็น SAFE / CAUTION / AVOID — map มาเป็น key ของ verdictMap
+export function statusToVerdictKey(status) {
+  if (status === 'SAFE') return 'green'
+  if (status === 'AVOID') return 'red'
+  return 'amber' // CAUTION และค่าอื่นๆ ที่ไม่รู้จัก fallback เป็น amber
+}
+
+export function getVerdict(status) {
+  return verdictMap[statusToVerdictKey(status)]
+}

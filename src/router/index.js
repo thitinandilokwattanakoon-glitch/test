@@ -4,6 +4,9 @@ import ScanView from '../views/ScanView.vue'
 import HistoryView from '../views/HistoryView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import TipsView from '../views/TipsView.vue'
+import LoginView from '../views/LoginView.vue'
+import RegisterView from '../views/RegisterView.vue'
+import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,6 +16,9 @@ const router = createRouter({
     { path: '/history', name: 'history', component: HistoryView },
     { path: '/profile', name: 'profile', component: ProfileView },
     { path: '/tips', name: 'tips', component: TipsView },
+    { path: '/login', name: 'login', component: LoginView },
+    { path: '/register', name: 'register', component: RegisterView },
+    { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView },
   ],
 })
 

@@ -103,23 +103,97 @@
     </button>
     <p v-if="analyzeNote" class="analyze-note error">{{ analyzeNote }}</p>
 
-    <!-- ผลลัพธ์จาก Gemini (ใบงานขั้นที่ 4) -->
-    <div v-if="resultText" class="result-box">
-      <div class="result-label">🤖 ผลการวิเคราะห์</div>
-      <p class="result-text">{{ resultText }}</p>
+    <!-- ผลลัพธ์วิเคราะห์แบบมีโครงสร้างจาก backend -->
+    <div v-if="result" class="result-box">
+      <div class="result-header">
+        <div class="result-label">🤖 ผลการวิเคราะห์</div>
+        <span v-if="verdict" class="status-pill" :style="{ color: verdict.color, background: verdict.color + '26' }">
+          {{ verdict.eyebrow }}
+        </span>
+      </div>
+
+      <p v-if="result.product_name || result.brand" class="result-product">
+        {{ result.product_name || 'ไม่ทราบชื่อสินค้า' }}
+        <span v-if="result.brand" class="result-brand">· {{ result.brand }}</span>
+      </p>
+
+      <h3 v-if="verdict" class="verdict-title" :style="{ color: verdict.color }">{{ verdict.title }}</h3>
+
+      <!-- summary จาก Gemini เป็นข้อความเฉพาะของสินค้านี้ (ต่างจาก verdict.desc ที่เป็นข้อความกลางๆ) -->
+      <p class="result-text">{{ result.summary }}</p>
+
+      <div v-if="result.flagged_ingredients?.length" class="flagged-list">
+        <div
+          v-for="(item, i) in result.flagged_ingredients"
+          :key="i"
+          class="flagged-item"
+          :class="`sev-${item.severity}`"
+        >
+          <span class="flagged-name">{{ item.name }}</span>
+          <span class="flagged-reason">{{ item.reason }}</span>
+        </div>
+      </div>
+
+      <p v-if="result.recommendation" class="result-recommendation">
+        💡 {{ result.recommendation }}
+      </p>
+
+      <!-- ผลค้นหาข้อมูลสินค้าเพิ่มเติมจากเว็บ (search_product_info second-pass) -->
+      <div v-if="result.product_search" class="product-search-box">
+        <div v-if="result.product_search.found" class="ps-content">
+          <div class="ps-header">🔎 ข้อมูลเพิ่มเติมจากการค้นหา</div>
+
+          <div v-if="result.product_search.ingredients_from_web?.length" class="ps-block">
+            <b>ส่วนประกอบที่ค้นเจอ:</b>
+            <span>{{ result.product_search.ingredients_from_web.join(', ') }}</span>
+          </div>
+
+          <div v-if="result.product_search.additives_from_web?.length" class="ps-block">
+            <b>วัตถุเจือปน:</b>
+            <span>{{ result.product_search.additives_from_web.join(', ') }}</span>
+          </div>
+
+          <div v-if="result.product_search.authority_warnings?.length" class="ps-block ps-warning">
+            <b>⚠️ คำเตือนจากหน่วยงาน:</b>
+            <span>{{ result.product_search.authority_warnings.join(', ') }}</span>
+          </div>
+
+          <div v-if="result.product_search.recall_history?.length" class="ps-block ps-warning">
+            <b>📢 ประวัติเรียกคืนสินค้า:</b>
+            <span>{{ result.product_search.recall_history.join(', ') }}</span>
+          </div>
+
+          <p v-if="result.product_search.label_vs_reference" class="ps-block">
+            <b>เทียบกับฉลากที่อ่านได้:</b> {{ result.product_search.label_vs_reference }}
+          </p>
+
+          <p v-if="result.product_search.health_insights" class="ps-block">
+            {{ result.product_search.health_insights }}
+          </p>
+
+          <p v-if="result.product_search.sources?.length" class="ps-sources">
+            แหล่งข้อมูล: {{ result.product_search.sources.join(', ') }}
+          </p>
+        </div>
+
+        <p v-else class="ps-not-found">
+          🔎 ค้นหาข้อมูลเพิ่มเติมจากเว็บแล้ว แต่ไม่พบข้อมูลของสินค้านี้
+        </p>
+      </div>
+
+      <p v-if="result.disclaimer" class="result-disclaimer">{{ result.disclaimer }}</p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onBeforeUnmount, computed } from 'vue'
+import { scanFood, getHealthProfile } from '../lib/api.js'
+import { getVerdict } from '../lib/verdict.js'
 
-// ---------- ตั้งค่า Gemini (ตามใบงานขั้นที่ 1) ----------
-// ⚠️ วิธีนี้ใช้ได้เฉพาะโปรเจกต์เทส/ฝึกหัด — API Key จะมองเห็นได้จาก DevTools
-// ของทุกคนที่เปิดเว็บนี้ ห้ามใช้กับโปรเจกต์จริงที่เผยแพร่สาธารณะ
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const GEMINI_MODEL = 'gemini-flash-lite-latest' // free tier โควตาสูงกว่า flash ปกติ
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+// ---------- ตั้งค่า Backend API ----------
+// ใช้ scanFood() / getHealthProfile() จาก src/lib/api.js
+// (client เดิมของโปรเจกต์ จัดการ device_id, JWT, error message ให้ครบอยู่แล้ว)
 
 // mode: 'idle' -> 'camera' (กำลังเปิดกล้องอยู่) -> 'preview' (มีรูปพร้อมวิเคราะห์)
 const mode = ref('idle')
@@ -137,7 +211,7 @@ const switching = ref(false)
 
 const analyzing = ref(false)
 const analyzeNote = ref('')
-const resultText = ref('')   // ผลลัพธ์จาก Gemini (ใบงานขั้นที่ 4)
+const result = ref(null)   // ผลลัพธ์ JSON แบบมีโครงสร้างจาก backend (analyze_food)
 
 let mediaStream = null
 let facingMode = 'environment' // เริ่มจากกล้องหลัง (สำหรับส่องฉลาก)
@@ -245,80 +319,45 @@ function retake() {
   imageUrl.value = null
   imageBlob.value = null
   analyzeNote.value = ''
-  resultText.value = ''
+  result.value = null
   if (galleryInput.value) galleryInput.value.value = ''
   mode.value = 'idle'
 }
 
-// ---------- แปลง Blob เป็น Base64 (ใบงานขั้นที่ 2) ----------
-// canvas.toDataURL() ในใบงานทำแบบเดียวกันนี้ แต่เรามี Blob อยู่แล้ว
-// (จากกล้อง หรือจากไฟล์ที่เลือก) เลยใช้ FileReader แปลงแทน
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      // reader.result หน้าตาเป็น "data:image/jpeg;base64,xxxxx"
-      // ตัดส่วนหน้า "data:...;base64," ออก เหลือแต่ตัว base64 จริงๆ
-      const base64 = reader.result.split(',')[1]
-      resolve(base64)
-    }
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
-}
-
-// ---------- วิเคราะห์ภาพ (ใบงานขั้นที่ 3-4) ----------
+// ---------- วิเคราะห์ภาพ: ส่งไป backend ผ่าน scanFood() (POST /analyze/scan) ----------
 async function analyzeImage() {
   if (!imageBlob.value) return
-  if (!GEMINI_API_KEY) {
-    analyzeNote.value = 'ไม่พบ VITE_GEMINI_API_KEY — เช็คไฟล์ .env ก่อนนะครับ'
-    return
-  }
 
   analyzing.value = true
   analyzeNote.value = ''
-  resultText.value = ''
+  result.value = null
 
   try {
-    // 1. แปลงรูปเป็น base64
-    const base64 = await blobToBase64(imageBlob.value)
-
-    // 2. สร้าง prompt (ตามใบงาน เพิ่มเรื่องโรคประจำตัวได้ตามคำถามท้ายใบงานข้อ 2)
-    const prompt = `ดูรูปนี้และบอกว่าเป็นสินค้าอะไร
-แล้วระบุส่วนผสมหลักที่มีโซเดียมสูง น้ำตาลสูง หรือไขมันสูง
-ตอบเป็นภาษาไทย กระชับ อ่านง่าย`
-
-    // 3. เรียก Gemini Vision API ตรงๆ จาก browser
-    const res = await fetch(GEMINI_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { inline_data: { mime_type: imageBlob.value.type || 'image/jpeg', data: base64 } },
-              { text: prompt },
-            ],
-          },
-        ],
-      }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      // เช่น 429 (โควตาหมด), 400/403 (key ผิด) — ดูคำถามท้ายใบงานข้อ 3
-      throw new Error(data.error?.message || `เรียก Gemini ไม่สำเร็จ (HTTP ${res.status})`)
+    // ดึงโปรไฟล์สุขภาพล่าสุดจาก backend ก่อนส่งวิเคราะห์
+    // (ถ้ายังไม่เคยตั้งค่า/ยังไม่ login ก็ปล่อยเป็น {} ได้ — backend จัดการ fallback ให้)
+    let healthProfile = {}
+    try {
+      healthProfile = (await getHealthProfile()) || {}
+    } catch {
+      healthProfile = {}
     }
 
-    // 4. ดึงข้อความออกมาแสดง
-    resultText.value = data.candidates?.[0]?.content?.parts?.[0]?.text || 'ไม่พบผลลัพธ์จาก Gemini'
+    const { result: analysis } = await scanFood({
+      imageBlob: imageBlob.value,
+      healthProfile,
+    })
+
+    // analysis ควรมีโครงตาม RESPONSE_SCHEMA ใน gemini.py
+    // เช่น { status, product_name, brand, ingredients, flagged_ingredients, summary, recommendation, disclaimer, ... }
+    result.value = analysis
   } catch (err) {
-    analyzeNote.value = `เกิดข้อผิดพลาด: ${err.message}`
+    analyzeNote.value = err.message || 'เกิดข้อผิดพลาดในการวิเคราะห์'
   } finally {
     analyzing.value = false
   }
 }
+
+const verdict = computed(() => (result.value ? getVerdict(result.value.status) : null))
 
 onBeforeUnmount(() => {
   stopStream()
@@ -449,11 +488,49 @@ onBeforeUnmount(() => {
   margin-top: 16px; padding: 16px 18px; background: var(--green-tint);
   border: 1px solid rgba(63, 143, 95, 0.25); border-radius: var(--radius-md);
 }
+.result-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
 .result-label {
   font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  letter-spacing: 0.06em; color: var(--green-deep); margin-bottom: 8px;
+  letter-spacing: 0.06em; color: var(--green-deep);
 }
-.result-text { margin: 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; color: var(--ink); }
+.status-pill {
+  font-size: 11.5px; font-weight: 700; padding: 4px 12px; border-radius: 999px;
+}
+
+.result-product { margin: 0 0 6px; font-size: 15px; font-weight: 700; color: var(--ink); }
+.result-brand { font-weight: 500; color: var(--muted); }
+
+.verdict-title { margin: 0 0 8px; font-size: 17px; font-weight: 700; }
+
+.result-text { margin: 0 0 10px; font-size: 14px; line-height: 1.7; white-space: pre-wrap; color: var(--ink); }
+
+.flagged-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.flagged-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border-radius: 10px; border-left: 3px solid var(--line);
+  background: var(--white); font-size: 13px;
+}
+.flagged-item.sev-high { border-left-color: var(--red); }
+.flagged-item.sev-medium { border-left-color: var(--orange); }
+.flagged-item.sev-low { border-left-color: var(--green); }
+.flagged-name { font-weight: 700; color: var(--ink); }
+.flagged-reason { color: var(--muted); font-size: 12.5px; }
+
+.result-recommendation { margin: 0 0 8px; font-size: 13.5px; line-height: 1.6; color: var(--green-deep); font-weight: 600; }
+.result-disclaimer { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+
+.product-search-box {
+  margin: 4px 0 12px; padding: 12px 14px; border-radius: 12px;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.ps-header { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.03em; }
+.ps-block { font-size: 12.5px; line-height: 1.6; color: var(--ink); margin-bottom: 6px; }
+.ps-block b { font-weight: 700; margin-right: 4px; }
+.ps-warning { color: var(--red); }
+.ps-sources { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+.ps-not-found { font-size: 12.5px; color: var(--muted); margin: 0; }
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }

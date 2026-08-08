@@ -46,13 +46,17 @@
           </span>
           ผลสแกนล่าสุด
         </div>
-        <div class="scan-preview">
-          <div class="scan-thumb" aria-hidden="true">🍿</div>
+
+        <div v-if="loadingHistory" class="mini-state">กำลังโหลด...</div>
+        <div v-else-if="latestScan" class="scan-preview">
+          <div class="scan-thumb" aria-hidden="true">🍽️</div>
           <div>
-            <b>มันฝรั่งทอดรสบาร์บีคิว</b>
-            <span class="tag amber">ควรระวัง</span>
+            <b>{{ latestScan.product_name || 'ไม่ทราบชื่อสินค้า' }}</b>
+            <span class="tag" :style="latestScanTagStyle">{{ getVerdict(latestScan.status).eyebrow }}</span>
           </div>
         </div>
+        <p v-else class="mini-state">ยังไม่มีประวัติการสแกน</p>
+
         <router-link to="/history" class="card-btn orange">ดูผลเต็ม</router-link>
       </article>
 
@@ -64,10 +68,13 @@
           โปรไฟล์สุขภาพ
         </div>
         <p class="profile-desc">โรคประจำตัว/แพ้อาหารที่ใช้เทียบผลสแกน:</p>
-        <div class="chips">
-          <span class="chip">เบาหวาน</span>
-          <span class="chip">แพ้นมวัว</span>
+
+        <div v-if="loadingProfile" class="mini-state">กำลังโหลด...</div>
+        <div v-else-if="profileChips.length" class="chips">
+          <span v-for="c in profileChips" :key="c" class="chip">{{ c }}</span>
         </div>
+        <p v-else class="mini-state">ยังไม่ได้ตั้งค่าโปรไฟล์สุขภาพ</p>
+
         <router-link to="/profile" class="card-btn green">ดูรายละเอียด</router-link>
       </article>
 
@@ -78,10 +85,12 @@
           </span>
           ประวัติการสแกน
         </div>
-        <ul class="stat-list">
-          <li><span class="stat-dot green"></span>สแกนทั้งหมด <b>19</b> ครั้ง</li>
-          <li><span class="stat-dot amber"></span>ควรระวัง <b>7</b> ครั้ง</li>
-          <li><span class="stat-dot red"></span>ควรหลีกเลี่ยง <b>3</b> ครั้ง</li>
+
+        <div v-if="loadingHistory" class="mini-state">กำลังโหลด...</div>
+        <ul v-else class="stat-list">
+          <li><span class="stat-dot green"></span>สแกนทั้งหมด <b>{{ scanStats.total }}</b> ครั้ง</li>
+          <li><span class="stat-dot amber"></span>ควรระวัง <b>{{ scanStats.caution }}</b> ครั้ง</li>
+          <li><span class="stat-dot red"></span>ควรหลีกเลี่ยง <b>{{ scanStats.avoid }}</b> ครั้ง</li>
         </ul>
         <router-link to="/history" class="card-btn blue">ดูประวัติทั้งหมด</router-link>
       </article>
@@ -91,12 +100,65 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { getHistory, getHealthProfile } from '../lib/api.js'
+import { getVerdict } from '../lib/verdict.js'
 
-// ข้อมูลตัวอย่าง — ต่อ backend จริงทีหลัง (ดึงจาก /history, โปรไฟล์ผู้ใช้ ฯลฯ)
-const notifications = ref([
-  { id: 1, text: 'สัปดาห์นี้สแกนพบโซเดียมเกินเป้าหมายไปแล้ว 3 ครั้ง' },
-])
+const loadingHistory = ref(true)
+const loadingProfile = ref(true)
+
+const scans = ref([])       // ประวัติทั้งหมดจาก /analyze/history
+const profile = ref(null)   // โปรไฟล์สุขภาพจาก /profile
+
+const latestScan = computed(() => scans.value[0] || null)
+
+const latestScanTagStyle = computed(() => {
+  if (!latestScan.value) return {}
+  const v = getVerdict(latestScan.value.status)
+  return { color: v.color, background: v.color + '26' }
+})
+
+const scanStats = computed(() => ({
+  total: scans.value.length,
+  caution: scans.value.filter((s) => s.status === 'CAUTION').length,
+  avoid: scans.value.filter((s) => s.status === 'AVOID').length,
+}))
+
+const profileChips = computed(() => {
+  if (!profile.value) return []
+  return [...(profile.value.conditions || []), ...(profile.value.allergies || [])]
+})
+
+// สร้างการแจ้งเตือนจากข้อมูลจริง (ไม่มี endpoint แจ้งเตือนแยกต่างหาก
+// เลยสร้างจากประวัติสแกนล่าสุดแทน — ถ้ามีสแกนที่ควรหลีกเลี่ยงเมื่อไม่นานนี้ก็เตือนไว้)
+const notifications = computed(() => {
+  const avoidRecent = scans.value.slice(0, 10).filter((s) => s.status === 'AVOID')
+  if (!avoidRecent.length) return []
+  return [
+    {
+      id: 'avoid-recent',
+      text: `พบสินค้าที่ควรหลีกเลี่ยงในการสแกนล่าสุด ${avoidRecent.length} ครั้ง ลองดูรายละเอียดในหน้าประวัติ`,
+    },
+  ]
+})
+
+onMounted(async () => {
+  try {
+    scans.value = await getHistory(50)
+  } catch {
+    scans.value = []
+  } finally {
+    loadingHistory.value = false
+  }
+
+  try {
+    profile.value = await getHealthProfile()
+  } catch {
+    profile.value = null
+  } finally {
+    loadingProfile.value = false
+  }
+})
 </script>
 
 <style scoped>
@@ -185,7 +247,7 @@ const notifications = ref([
 .tag {
   font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
 }
-.tag.amber { background: #fbeee0; color: #a35a1c; }
+.mini-state { font-size: 12.5px; color: var(--muted); margin: 0; }
 
 .profile-desc { font-size: 12.5px; color: var(--muted); margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
