@@ -165,9 +165,24 @@ async def scan_food(
 
 
 @router.get("/history/{device_id}")
-async def get_history(device_id: str, limit: int = 20, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.device_id == device_id))
-    user = result.scalar_one_or_none()
+async def get_history(
+    device_id: str,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer_opt),
+):
+    jwt_payload = decode_optional(creds)
+    user: User | None = None
+    if jwt_payload:
+        try:
+            user = await db.get(User, int(jwt_payload["sub"]))
+        except (ValueError, KeyError):
+            pass
+
+    if not user:
+        result = await db.execute(select(User).where(User.device_id == device_id))
+        user = result.scalar_one_or_none()
+
     if not user:
         return {"scans": []}
 
