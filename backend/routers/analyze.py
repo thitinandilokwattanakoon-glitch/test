@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -12,9 +11,7 @@ logger = logging.getLogger(__name__)
 from core.database import get_db
 from core.gemini import analyze_food, search_product_info, reconcile_analysis
 from core.models import User, Scan
-from core.auth import decode_optional
-
-_bearer_opt = HTTPBearer(auto_error=False)
+from core.auth import require_user
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
@@ -45,7 +42,7 @@ async def scan_food(
     text_input: str | None = Form(None),
     image: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer_opt),
+    jwt_payload: dict = Depends(require_user),
 ):
     # validate image
     image_b64 = None
@@ -78,37 +75,28 @@ async def scan_food(
         raise HTTPException(400, "health_profile ไม่ใช่ JSON ที่ถูกต้อง")
 
     # ── resolve user ──────────────────────────────────────────────────────────
-    # Priority: JWT auth user > device_id lookup > create new anonymous user
-    jwt_payload = decode_optional(creds)
-    user: User | None = None
-
-    if jwt_payload:
-        try:
-            user = await db.get(User, int(jwt_payload["sub"]))
-        except (ValueError, KeyError):
-            pass
-
+    # ต้องล็อกอินเท่านั้น (require_user เป็นคน raise 401 ให้เองถ้าไม่มี/หมดอายุ token)
+    try:
+        user = await db.get(User, int(jwt_payload["sub"]))
+    except (ValueError, KeyError):
+        user = None
     if not user:
-        res = await db.execute(select(User).where(User.device_id == device_id))
-        user = res.scalar_one_or_none()
+        raise HTTPException(401, "กรุณาเข้าสู่ระบบ")
 
-    if not user:
-        # brand-new anonymous session
-        user = User(device_id=device_id, health_profile=client_profile)
-        db.add(user)
-        await db.flush()
+    # device_id ยังผูกไว้กับ user เพื่อ track ประวัติต่อเนื่องข้ามอุปกรณ์ได้ในอนาคต
+    if not user.device_id:
+        user.device_id = device_id
 
     # ── resolve profile ───────────────────────────────────────────────────────
-    # Authenticated → DB profile is authoritative; never overwrite from client
-    # Anonymous     → client profile is source of truth; save to DB
-    if jwt_payload and user.health_profile:
+    # DB profile คือความจริงหลักของผู้ใช้ที่ล็อกอินแล้ว
+    if user.health_profile:
         profile = user.health_profile
         logger.info("[Scan] using DB profile for authenticated user %s", user.id)
     elif client_profile:
-        user.health_profile = client_profile   # update DB with latest client data
+        user.health_profile = client_profile
         profile = client_profile
     else:
-        profile = user.health_profile or {}    # fall back to whatever is in DB
+        profile = {}
 
     # call gemini
     try:
@@ -169,19 +157,14 @@ async def get_history(
     device_id: str,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer_opt),
+    jwt_payload: dict = Depends(require_user),
 ):
-    jwt_payload = decode_optional(creds)
-    user: User | None = None
-    if jwt_payload:
-        try:
-            user = await db.get(User, int(jwt_payload["sub"]))
-        except (ValueError, KeyError):
-            pass
-
-    if not user:
-        result = await db.execute(select(User).where(User.device_id == device_id))
-        user = result.scalar_one_or_none()
+    # ไม่สนใจ device_id ที่ส่งมาจาก URL อีกต่อไป — ใช้ user จาก JWT เท่านั้น
+    # (กัน user คนหนึ่งสวม device_id ของอีกคนแล้วเห็นประวัติของคนอื่น)
+    try:
+        user = await db.get(User, int(jwt_payload["sub"]))
+    except (ValueError, KeyError):
+        user = None
 
     if not user:
         return {"scans": []}
